@@ -43,6 +43,8 @@ import {
   ATTR_SERVICE_VERSION,
 } from '@opentelemetry/semantic-conventions';
 
+import { type GlobalWithOpenTelemetrySdk } from './opentelemetry.js';
+
 // For troubleshooting, set the log level to DiagLogLevel.DEBUG
 class JsonConsoleDiagLogger implements DiagLogger {
   public readonly diagConsoleLogger = new DiagConsoleLogger();
@@ -66,6 +68,14 @@ diag.setLogger(new JsonConsoleDiagLogger(), DiagLogLevel.INFO);
 
 const serviceName = process.env.OTEL_SERVICE_NAME;
 const exporter = new OTLPTraceExporter();
+const metricReaders =
+  process.env.OTEL_METRICS_EXPORTER === 'none'
+    ? []
+    : [
+        new PeriodicExportingMetricReader({
+          exporter: new OTLPMetricExporter(),
+        }),
+      ];
 
 function getApproxStringLength(arg: unknown): number {
   if (typeof arg === 'string' || arg instanceof Buffer) {
@@ -93,9 +103,7 @@ const sdk = new NodeSDK({
       maxQueueSize: 4096,
     }),
   ],
-  metricReader: new PeriodicExportingMetricReader({
-    exporter: new OTLPMetricExporter(),
-  }),
+  metricReaders,
   resource: defaultResource().merge(
     resourceFromAttributes({
       [ATTR_SERVICE_NAME]: serviceName,
@@ -207,6 +215,8 @@ const sdk = new NodeSDK({
     }),
   ],
 });
+
+(globalThis as GlobalWithOpenTelemetrySdk).__coopOpenTelemetrySdk = sdk;
 
 // initialize the SDK and register with the OpenTelemetry API
 // this enables the API to record telemetry
