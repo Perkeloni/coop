@@ -43,9 +43,7 @@ import {
   ATTR_SERVICE_VERSION,
 } from '@opentelemetry/semantic-conventions';
 
-type GlobalWithOpenTelemetrySdk = typeof globalThis & {
-  __coopOpenTelemetrySdk?: { shutdown: () => Promise<void> };
-};
+import { type GlobalWithOpenTelemetrySdk } from './opentelemetry.js';
 
 // For troubleshooting, set the log level to DiagLogLevel.DEBUG
 class JsonConsoleDiagLogger implements DiagLogger {

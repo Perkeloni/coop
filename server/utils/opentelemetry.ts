@@ -1,3 +1,1 @@
-export type GlobalWithOpenTelemetrySdk = typeof globalThis & {
-  __coopOpenTelemetrySdk?: { shutdown: () => Promise<void> };
-};
+export type { GlobalWithOpenTelemetrySdk } from '../../nodejs-instrumentation/src/opentelemetry.js';
