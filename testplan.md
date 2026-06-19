@@ -42,7 +42,7 @@ docker compose run --rm migrations
 2. Command:
 
 ```bash
-docker compose exec postgres psql -U postgres -d api-server -c "\dt manual_review_tool.*"
+docker compose exec postgres psql -U postgres -d postgres -c "\dt manual_review_tool.*"
 ```
 
 3. Expected output:
@@ -209,6 +209,57 @@ node --require ../nodejs-instrumentation/transpiled/autoinstrumentation.js \
 
 - Jaeger shows `runWorkerOrJob:RecoverMrtQueueJob`
 - no metrics export warning is logged
+
+## 10. Smoke Checks I Ran
+
+These are the focused smoke checks I used to verify the implementation after the refactor:
+
+1. Enqueue-failure persistence
+
+```bash
+cd server
+env DATABASE_HOST=127.0.0.1 DATABASE_READ_ONLY_HOST=127.0.0.1 DATABASE_PORT=5432 DATABASE_NAME=postgres DATABASE_USER=postgres DATABASE_PASSWORD=postgres123 REDIS_HOST=127.0.0.1 REDIS_PORT=6379 REDIS_USE_CLUSTER=false SCYLLA_USERNAME=cassandra SCYLLA_PASSWORD=cassandra SCYLLA_HOSTS=127.0.0.1:9042 SCYLLA_LOCAL_DATACENTER=datacenter1 SCYLLA_KEYSPACE=item_investigation_service SCYLLA_REPLICATION_CLASS=SimpleStrategy SCYLLA_REPLICATION_FACTOR=1 SCYLLA_COMPACTION_STRATEGY=SizeTieredCompactionStrategy SCYLLA_HAS_ENTERPRISE_FEATURES=false UI_URL=http://localhost:3000 OTEL_SERVICE_NAME=coop-test MRT_RECOVERY_ENABLED=true MRT_RECOVERY_LOOKBACK_DAYS=30 MRT_RECOVERY_MAX_RETRIES=2 JEST_JUNIT_OUTPUT_DIR=/tmp/opencode-junit npm run test:ci -- --testNamePattern='persists meaningful enqueue failures for later recovery' services/manualReviewToolService/manualReviewToolService.test.ts
+```
+
+- PASS
+- Verifies enqueue failures persist a recovery row with the correct identifiers and error text.
+
+2. Recovery-state retry and reset
+
+```bash
+cd server
+env DATABASE_HOST=127.0.0.1 DATABASE_READ_ONLY_HOST=127.0.0.1 DATABASE_PORT=5432 DATABASE_NAME=postgres DATABASE_USER=postgres DATABASE_PASSWORD=postgres123 REDIS_HOST=127.0.0.1 REDIS_PORT=6379 REDIS_USE_CLUSTER=false SCYLLA_USERNAME=cassandra SCYLLA_PASSWORD=cassandra SCYLLA_HOSTS=127.0.0.1:9042 SCYLLA_LOCAL_DATACENTER=datacenter1 SCYLLA_KEYSPACE=item_investigation_service SCYLLA_REPLICATION_CLASS=SimpleStrategy SCYLLA_REPLICATION_FACTOR=1 SCYLLA_COMPACTION_STRATEGY=SizeTieredCompactionStrategy SCYLLA_HAS_ENTERPRISE_FEATURES=false UI_URL=http://localhost:3000 OTEL_SERVICE_NAME=coop-test MRT_RECOVERY_ENABLED=true MRT_RECOVERY_LOOKBACK_DAYS=30 MRT_RECOVERY_MAX_RETRIES=2 JEST_JUNIT_OUTPUT_DIR=/tmp/opencode-junit npm run test:ci -- --testNamePattern='tracks retries and reset state' services/manualReviewToolService/modules/MrtRecoveryOperations.test.ts
+```
+
+- PASS
+- Verifies `retryCount` increments, `FAILED` is reached at the retry limit, org-scoped reset works, and other-org rows remain unchanged.
+
+3. Reset mutation guardrails
+
+```bash
+cd server
+env DATABASE_HOST=127.0.0.1 DATABASE_READ_ONLY_HOST=127.0.0.1 DATABASE_PORT=5432 DATABASE_NAME=postgres DATABASE_USER=postgres DATABASE_PASSWORD=postgres123 REDIS_HOST=127.0.0.1 REDIS_PORT=6379 REDIS_USE_CLUSTER=false SCYLLA_USERNAME=cassandra SCYLLA_PASSWORD=cassandra SCYLLA_HOSTS=127.0.0.1:9042 SCYLLA_LOCAL_DATACENTER=datacenter1 SCYLLA_KEYSPACE=item_investigation_service SCYLLA_REPLICATION_CLASS=SimpleStrategy SCYLLA_REPLICATION_FACTOR=1 SCYLLA_HAS_ENTERPRISE_FEATURES=false UI_URL=http://localhost:3000 OTEL_SERVICE_NAME=coop-test MRT_RECOVERY_ENABLED=true MRT_RECOVERY_LOOKBACK_DAYS=30 MRT_RECOVERY_MAX_RETRIES=2 JEST_JUNIT_OUTPUT_DIR=/tmp/opencode-junit npm run test:ci -- graphql/modules/manualReviewTool.resetMrtRecoveryJobs.test.ts
+```
+
+- PASS
+- Verifies empty input, invalid job IDs, and org-scoped reset behavior.
+
+4. Worker startup smoke
+
+```bash
+cd server
+env DATABASE_HOST=127.0.0.1 DATABASE_READ_ONLY_HOST=127.0.0.1 DATABASE_PORT=5432 DATABASE_NAME=postgres DATABASE_USER=postgres DATABASE_PASSWORD=postgres123 REDIS_HOST=127.0.0.1 REDIS_PORT=6379 REDIS_USE_CLUSTER=false SCYLLA_USERNAME=cassandra SCYLLA_PASSWORD=cassandra SCYLLA_HOSTS=127.0.0.1:9042 SCYLLA_LOCAL_DATACENTER=datacenter1 SCYLLA_KEYSPACE=item_investigation_service SCYLLA_REPLICATION_CLASS=SimpleStrategy SCYLLA_REPLICATION_FACTOR=1 SCYLLA_HAS_ENTERPRISE_FEATURES=false CLICKHOUSE_PROTOCOL=http CLICKHOUSE_HOST=127.0.0.1 CLICKHOUSE_PORT=8123 CLICKHOUSE_USERNAME=default CLICKHOUSE_PASSWORD=clickhouse CLICKHOUSE_DATABASE=analytics CLICKHOUSE_MIGRATIONS_TABLE=MIGRATIONS_METADATA UI_URL=http://localhost:3000 OTEL_SERVICE_NAME=coop-test MRT_RECOVERY_ENABLED=true MRT_RECOVERY_LOOKBACK_DAYS=30 MRT_RECOVERY_MAX_RETRIES=2 JEST_JUNIT_OUTPUT_DIR=/tmp/opencode-junit npm run runWorkerOrJob RecoverMrtQueueJob
+```
+
+- PASS after adding a malformed recovery-id guard.
+- The worker now skips legacy malformed IDs, loads candidates, and exits cleanly on the smoke dataset.
+
+5. Observed edge cases during smoke
+
+- `REDIS_USE_CLUSTER=false` is required for local runs.
+- `SCYLLA_USERNAME` / `SCYLLA_PASSWORD` are required for service startup.
+- `CLICKHOUSE_*` env vars are required for the worker runtime.
+- Legacy recovery `job_id`s in the local database may be malformed; the worker now skips them instead of crashing.
 
 ## What I’ll Report Back
 
